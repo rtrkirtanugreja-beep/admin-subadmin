@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { User, Lock, Bell, Shield } from 'lucide-react'
+import { storage } from '../../data/storage.js'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import type { AuthUser } from '../../types'
@@ -27,15 +28,10 @@ export default function Settings({ user }: SettingsProps) {
     setMessage('')
 
     try {
-      const { error } = await supabase
-        .from('user_profiles')
-        .update({
-          full_name: profile.full_name,
-          email: profile.email,
-        })
-        .eq('id', user!.id)
-
-      if (error) throw error
+      storage.update('users', user!.id, {
+        full_name: profile.full_name,
+        email: profile.email,
+      })
       setMessage('Profile updated successfully')
     } catch (error: any) {
       setMessage('Error updating profile: ' + error.message)

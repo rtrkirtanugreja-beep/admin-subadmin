@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Plus, Filter, Calendar, User } from 'lucide-react'
 import { useTasks } from '../../hooks/useTasks'
-import { supabase } from '../../lib/supabase'
+import { storage } from '../../data/storage.js'
 import type { AuthUser, User as AppUser, Department } from '../../types'
 
 interface TaskManagementProps {
@@ -26,13 +26,8 @@ export default function TaskManagement({ user }: TaskManagementProps) {
 
   const fetchSubAdmins = async () => {
     try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('role', 'sub_admin')
-
-      if (error) throw error
-      setSubAdmins(data || [])
+      const allSubAdmins = storage.getWhere('users', user => user.role === 'sub_admin')
+      setSubAdmins(allSubAdmins)
     } catch (error) {
       console.error('Error fetching sub admins:', error)
     }
@@ -40,12 +35,8 @@ export default function TaskManagement({ user }: TaskManagementProps) {
 
   const fetchDepartments = async () => {
     try {
-      const { data, error } = await supabase
-        .from('departments')
-        .select('*')
-
-      if (error) throw error
-      setDepartments(data || [])
+      const allDepartments = storage.getAll('departments')
+      setDepartments(allDepartments)
     } catch (error) {
       console.error('Error fetching departments:', error)
     }

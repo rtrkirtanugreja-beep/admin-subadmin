@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { storage } from '../data/storage.js'
 import type { AuthUser } from '../types'
 
 export function useAuth() {
@@ -8,13 +9,12 @@ export function useAuth() {
 
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchUserProfile(session.user.id)
-      } else {
-        setLoading(false)
-      }
-    })
+    const { data: { session } } = supabase.auth.getSession()
+    if (session?.user) {
+      fetchUserProfile(session.user.id)
+    } else {
+      setLoading(false)
+    }
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -31,15 +31,11 @@ export function useAuth() {
 
   const fetchUserProfile = async (userId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('id, email, full_name, role, department_id')
-        .eq('id', userId)
-        .single()
-
-      if (error) throw error
-
-      setUser(data)
+      const userProfile = storage.getById('users', userId)
+      if (!userProfile) {
+        throw new Error('User profile not found')
+      }
+      setUser(userProfile)
     } catch (error) {
       console.error('Error fetching user profile:', error)
       setUser(null)
@@ -62,18 +58,21 @@ export function useAuth() {
   }
 
   const createSubAdmin = async (email: string, password: string, fullName: string, departmentId: string) => {
-    const { data, error } = await supabase.auth.signUp({
+    // Check if user already exists
+    const existingUsers = storage.getWhere('users', u => u.email === email)
+    if (existingUsers.length > 0) {
+      return { data: null, error: { message: 'User already exists' } }
+    }
+
+    // Create new user
+    const newUser = storage.insert('users', {
       email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-          role: 'sub_admin',
-          department_id: departmentId,
-        }
-      }
+      full_name: fullName,
+      role: 'sub_admin',
+      department_id: departmentId,
     })
-    return { data, error }
+
+    return { data: { user: newUser }, error: null }
   }
 
   return {

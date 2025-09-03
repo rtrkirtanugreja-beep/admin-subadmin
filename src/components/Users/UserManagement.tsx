@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Plus, UserPlus, Trash2, Edit } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
+import { storage } from '../../data/storage.js'
 import { useAuth } from '../../hooks/useAuth'
 import type { User, Department } from '../../types'
 
@@ -18,14 +18,23 @@ export default function UserManagement() {
 
   const fetchUsers = async () => {
     try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('*, department:departments(name)')
-        .eq('role', 'sub_admin')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setUsers(data || [])
+      const allUsers = storage.getWhere('users', user => user.role === 'sub_admin')
+      
+      // Enrich users with department data
+      const enrichedUsers = allUsers.map(user => {
+        const department = user.department_id ? storage.getById('departments', user.department_id) : null
+        return {
+          ...user,
+          department
+        }
+      })
+      
+      // Sort by created_at descending
+      const sortedUsers = enrichedUsers.sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+      
+      setUsers(sortedUsers)
     } catch (error) {
       console.error('Error fetching users:', error)
     } finally {
@@ -35,13 +44,9 @@ export default function UserManagement() {
 
   const fetchDepartments = async () => {
     try {
-      const { data, error } = await supabase
-        .from('departments')
-        .select('*')
-        .order('name')
-
-      if (error) throw error
-      setDepartments(data || [])
+      const allDepartments = storage.getAll('departments')
+      const sortedDepartments = allDepartments.sort((a, b) => a.name.localeCompare(b.name))
+      setDepartments(sortedDepartments)
     } catch (error) {
       console.error('Error fetching departments:', error)
     }

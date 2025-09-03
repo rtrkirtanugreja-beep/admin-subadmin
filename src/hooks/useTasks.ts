@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { storage } from '../data/storage.js'
 import type { Task } from '../types'
 
 export function useTasks(userId?: string, userRole?: string) {
@@ -8,46 +8,34 @@ export function useTasks(userId?: string, userRole?: string) {
 
   useEffect(() => {
     if (!userId) return
-
     fetchTasks()
-
-    // Subscribe to real-time changes
-    const subscription = supabase
-      .channel('tasks')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'tasks' 
-      }, () => {
-        fetchTasks()
-      })
-      .subscribe()
-
-    return () => {
-      subscription.unsubscribe()
-    }
   }, [userId, userRole])
 
   const fetchTasks = async () => {
     try {
-      let query = supabase
-        .from('tasks')
-        .select(`
-          *,
-          department:departments(name),
-          assignee:user_profiles!tasks_assigned_to_fkey(full_name, email),
-          assigner:user_profiles!tasks_assigned_by_fkey(full_name)
-        `)
+      let allTasks = storage.getAll('tasks')
+      
+      // Enrich tasks with related data
+      const enrichedTasks = allTasks.map(task => {
+        const department = storage.getById('departments', task.department_id)
+        const assignee = storage.getById('users', task.assigned_to)
+        const assigner = storage.getById('users', task.assigned_by)
+        
+        return {
+          ...task,
+          department,
+          assignee,
+          assigner
+        }
+      })
 
       // Sub admins only see their own tasks
       if (userRole === 'sub_admin') {
-        query = query.eq('assigned_to', userId)
+        const userTasks = enrichedTasks.filter(task => task.assigned_to === userId)
+        setTasks(userTasks)
+      } else {
+        setTasks(enrichedTasks)
       }
-
-      const { data, error } = await query.order('created_at', { ascending: false })
-
-      if (error) throw error
-      setTasks(data || [])
     } catch (error) {
       console.error('Error fetching tasks:', error)
     } finally {
@@ -56,35 +44,35 @@ export function useTasks(userId?: string, userRole?: string) {
   }
 
   const createTask = async (taskData: Omit<Task, 'id' | 'created_at' | 'updated_at'>) => {
-    const { data, error } = await supabase
-      .from('tasks')
-      .insert(taskData)
-      .select()
-      .single()
-
-    if (error) throw error
-    return data
+    try {
+      const newTask = storage.insert('tasks', taskData)
+      await fetchTasks() // Refresh tasks
+      return newTask
+    } catch (error) {
+      console.error('Error creating task:', error)
+      throw error
+    }
   }
 
   const updateTask = async (id: string, updates: Partial<Task>) => {
-    const { data, error } = await supabase
-      .from('tasks')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select()
-      .single()
-
-    if (error) throw error
-    return data
+    try {
+      const updatedTask = storage.update('tasks', id, updates)
+      await fetchTasks() // Refresh tasks
+      return updatedTask
+    } catch (error) {
+      console.error('Error updating task:', error)
+      throw error
+    }
   }
 
   const deleteTask = async (id: string) => {
-    const { error } = await supabase
-      .from('tasks')
-      .delete()
-      .eq('id', id)
-
-    if (error) throw error
+    try {
+      storage.delete('tasks', id)
+      await fetchTasks() // Refresh tasks
+    } catch (error) {
+      console.error('Error deleting task:', error)
+      throw error
+    }
   }
 
   return {

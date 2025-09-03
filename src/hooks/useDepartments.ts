@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { storage } from '../data/storage.js'
 import type { Department } from '../types'
 
 export function useDepartments() {
@@ -8,33 +8,13 @@ export function useDepartments() {
 
   useEffect(() => {
     fetchDepartments()
-
-    // Subscribe to real-time changes
-    const subscription = supabase
-      .channel('departments')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'departments' 
-      }, () => {
-        fetchDepartments()
-      })
-      .subscribe()
-
-    return () => {
-      subscription.unsubscribe()
-    }
   }, [])
 
   const fetchDepartments = async () => {
     try {
-      const { data, error } = await supabase
-        .from('departments')
-        .select('*')
-        .order('name')
-
-      if (error) throw error
-      setDepartments(data || [])
+      const allDepartments = storage.getAll('departments')
+      const sortedDepartments = allDepartments.sort((a, b) => a.name.localeCompare(b.name))
+      setDepartments(sortedDepartments)
     } catch (error) {
       console.error('Error fetching departments:', error)
     } finally {
@@ -43,35 +23,35 @@ export function useDepartments() {
   }
 
   const createDepartment = async (name: string, description: string) => {
-    const { data, error } = await supabase
-      .from('departments')
-      .insert({ name, description })
-      .select()
-      .single()
-
-    if (error) throw error
-    return data
+    try {
+      const newDepartment = storage.insert('departments', { name, description })
+      await fetchDepartments() // Refresh departments
+      return newDepartment
+    } catch (error) {
+      console.error('Error creating department:', error)
+      throw error
+    }
   }
 
   const updateDepartment = async (id: string, updates: Partial<Department>) => {
-    const { data, error } = await supabase
-      .from('departments')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single()
-
-    if (error) throw error
-    return data
+    try {
+      const updatedDepartment = storage.update('departments', id, updates)
+      await fetchDepartments() // Refresh departments
+      return updatedDepartment
+    } catch (error) {
+      console.error('Error updating department:', error)
+      throw error
+    }
   }
 
   const deleteDepartment = async (id: string) => {
-    const { error } = await supabase
-      .from('departments')
-      .delete()
-      .eq('id', id)
-
-    if (error) throw error
+    try {
+      storage.delete('departments', id)
+      await fetchDepartments() // Refresh departments
+    } catch (error) {
+      console.error('Error deleting department:', error)
+      throw error
+    }
   }
 
   return {

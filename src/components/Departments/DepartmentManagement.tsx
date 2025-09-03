@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Plus, Building2, Users, Edit, Trash2 } from 'lucide-react'
-import { supabase } from '../../lib/supabase'
+import { storage } from '../../data/storage.js'
 import type { Department, User } from '../../types'
 
 export default function DepartmentManagement() {
@@ -17,13 +17,11 @@ export default function DepartmentManagement() {
 
   const fetchDepartments = async () => {
     try {
-      const { data, error } = await supabase
-        .from('departments')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setDepartments(data || [])
+      const allDepartments = storage.getAll('departments')
+      const sortedDepartments = allDepartments.sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+      setDepartments(sortedDepartments)
     } catch (error) {
       console.error('Error fetching departments:', error)
     } finally {
@@ -33,13 +31,18 @@ export default function DepartmentManagement() {
 
   const fetchSubAdmins = async () => {
     try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('*, department:departments(name)')
-        .eq('role', 'sub_admin')
-
-      if (error) throw error
-      setSubAdmins(data || [])
+      const allSubAdmins = storage.getWhere('users', user => user.role === 'sub_admin')
+      
+      // Enrich with department data
+      const enrichedSubAdmins = allSubAdmins.map(user => {
+        const department = user.department_id ? storage.getById('departments', user.department_id) : null
+        return {
+          ...user,
+          department
+        }
+      })
+      
+      setSubAdmins(enrichedSubAdmins)
     } catch (error) {
       console.error('Error fetching sub admins:', error)
     }
@@ -47,20 +50,14 @@ export default function DepartmentManagement() {
 
   const handleCreateDepartment = async (e: React.FormEvent) => {
     e.preventDefault()
-    const form = e.target as HTMLFormForm
+    const form = e.target as HTMLFormElement
     const formData = new FormData(form)
     
     try {
-      const { data, error } = await supabase
-        .from('departments')
-        .insert({
-          name: formData.get('name') as string,
-          description: formData.get('description') as string,
-        })
-        .select()
-        .single()
-
-      if (error) throw error
+      storage.insert('departments', {
+        name: formData.get('name') as string,
+        description: formData.get('description') as string,
+      })
       
       setShowCreateForm(false)
       form.reset()
@@ -79,15 +76,10 @@ export default function DepartmentManagement() {
     const formData = new FormData(form)
     
     try {
-      const { error } = await supabase
-        .from('departments')
-        .update({
-          name: formData.get('name') as string,
-          description: formData.get('description') as string,
-        })
-        .eq('id', editingDepartment.id)
-
-      if (error) throw error
+      storage.update('departments', editingDepartment.id, {
+        name: formData.get('name') as string,
+        description: formData.get('description') as string,
+      })
       
       setEditingDepartment(null)
       fetchDepartments()
@@ -103,12 +95,7 @@ export default function DepartmentManagement() {
     }
 
     try {
-      const { error } = await supabase
-        .from('departments')
-        .delete()
-        .eq('id', id)
-
-      if (error) throw error
+      storage.delete('departments', id)
       fetchDepartments()
     } catch (error: any) {
       console.error('Error deleting department:', error)

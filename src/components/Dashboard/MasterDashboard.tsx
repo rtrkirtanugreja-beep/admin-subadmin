@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { BarChart3, Users, CheckSquare, Clock, AlertTriangle } from 'lucide-react'
 import { useTasks } from '../../hooks/useTasks'
-import { supabase } from '../../lib/supabase'
+import { storage } from '../../data/storage.js'
 import type { AuthUser, User, Task } from '../../types'
 
 interface MasterDashboardProps {
@@ -32,10 +32,7 @@ export default function MasterDashboard({ user }: MasterDashboardProps) {
   const fetchDashboardData = async () => {
     try {
       // Fetch sub admin count
-      const { count: subAdminCount } = await supabase
-        .from('user_profiles')
-        .select('*', { count: 'exact', head: true })
-        .eq('role', 'sub_admin')
+      const subAdminCount = storage.count('users', user => user.role === 'sub_admin')
 
       // Calculate task statistics
       const totalTasks = tasks.length
@@ -45,10 +42,10 @@ export default function MasterDashboard({ user }: MasterDashboardProps) {
       ).length
 
       setStats({
-        totalSubAdmins: subAdminCount || 0,
+        totalSubAdmins: subAdminCount,
         totalTasks,
         completedTasks,
-        overdueasks: overdueTasks,
+        overdueTasks: overdueTasks,
       })
 
       // Get recent tasks

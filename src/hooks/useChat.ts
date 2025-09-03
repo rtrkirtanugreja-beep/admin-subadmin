@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { storage } from '../data/storage.js'
 import type { Message, ChatConversation, User } from '../types'
 
 export function useChat(currentUserId?: string) {
@@ -10,31 +10,7 @@ export function useChat(currentUserId?: string) {
 
   useEffect(() => {
     if (!currentUserId) return
-
     fetchConversations()
-    
-    // Subscribe to real-time message changes
-    const subscription = supabase
-      .channel('messages')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'messages',
-      }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          const newMessage = payload.new as Message
-          // Only add if it's relevant to current user
-          if (newMessage.sender_id === currentUserId || newMessage.receiver_id === currentUserId) {
-            setMessages(prev => [...prev, newMessage])
-            fetchConversations() // Refresh conversations to update last message
-          }
-        }
-      })
-      .subscribe()
-
-    return () => {
-      subscription.unsubscribe()
-    }
   }, [currentUserId])
 
   useEffect(() => {
@@ -46,36 +22,33 @@ export function useChat(currentUserId?: string) {
 
   const fetchConversations = async () => {
     try {
-      const { data: users, error } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .neq('id', currentUserId)
-
-      if (error) throw error
-
+      const users = storage.getWhere('users', user => user.id !== currentUserId)
       const conversationsData: ChatConversation[] = []
 
-      for (const user of users || []) {
-        const { data: lastMessage } = await supabase
-          .from('messages')
-          .select('*')
-          .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${user.id}),and(sender_id.eq.${user.id},receiver_id.eq.${currentUserId})`)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
+      for (const user of users) {
+        // Get last message between current user and this user
+        const allMessages = storage.getAll('messages')
+        const conversationMessages = allMessages.filter(msg => 
+          (msg.sender_id === currentUserId && msg.receiver_id === user.id) ||
+          (msg.sender_id === user.id && msg.receiver_id === currentUserId)
+        )
+        
+        const lastMessage = conversationMessages.sort((a, b) => 
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )[0]
 
-        const { count: unreadCount } = await supabase
-          .from('messages')
-          .select('*', { count: 'exact', head: true })
-          .eq('sender_id', user.id)
-          .eq('receiver_id', currentUserId)
-          .eq('is_read', false)
+        // Count unread messages from this user
+        const unreadCount = conversationMessages.filter(msg => 
+          msg.sender_id === user.id && 
+          msg.receiver_id === currentUserId && 
+          !msg.is_read
+        ).length
 
         conversationsData.push({
           id: user.id,
           user,
-          lastMessage: lastMessage || undefined,
-          unreadCount: unreadCount || 0,
+          lastMessage,
+          unreadCount,
         })
       }
 
@@ -89,14 +62,17 @@ export function useChat(currentUserId?: string) {
 
   const fetchMessages = async (otherUserId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${currentUserId})`)
-        .order('created_at', { ascending: true })
-
-      if (error) throw error
-      setMessages(data || [])
+      const allMessages = storage.getAll('messages')
+      const conversationMessages = allMessages.filter(msg => 
+        (msg.sender_id === currentUserId && msg.receiver_id === otherUserId) ||
+        (msg.sender_id === otherUserId && msg.receiver_id === currentUserId)
+      )
+      
+      const sortedMessages = conversationMessages.sort((a, b) => 
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      )
+      
+      setMessages(sortedMessages)
     } catch (error) {
       console.error('Error fetching messages:', error)
     }
@@ -121,21 +97,21 @@ export function useChat(currentUserId?: string) {
         attachmentType = attachment.type
       }
 
-      const { data, error } = await supabase
-        .from('messages')
-        .insert({
-          content,
-          sender_id: currentUserId,
-          receiver_id: receiverId,
-          attachment_url: attachmentUrl,
-          attachment_name: attachmentName,
-          attachment_type: attachmentType,
-        })
-        .select()
-        .single()
+      const newMessage = storage.insert('messages', {
+        content,
+        sender_id: currentUserId,
+        receiver_id: receiverId,
+        attachment_url: attachmentUrl,
+        attachment_name: attachmentName,
+        attachment_type: attachmentType,
+        is_read: false,
+      })
 
-      if (error) throw error
-      return data
+      // Refresh messages and conversations
+      await fetchMessages(receiverId)
+      await fetchConversations()
+      
+      return newMessage
     } catch (error) {
       console.error('Error sending message:', error)
       throw error
@@ -144,12 +120,16 @@ export function useChat(currentUserId?: string) {
 
   const markMessagesAsRead = async (senderId: string) => {
     try {
-      await supabase
-        .from('messages')
-        .update({ is_read: true })
-        .eq('sender_id', senderId)
-        .eq('receiver_id', currentUserId)
-        .eq('is_read', false)
+      const allMessages = storage.getAll('messages')
+      const unreadMessages = allMessages.filter(msg => 
+        msg.sender_id === senderId && 
+        msg.receiver_id === currentUserId && 
+        !msg.is_read
+      )
+
+      unreadMessages.forEach(msg => {
+        storage.update('messages', msg.id, { is_read: true })
+      })
 
       // Refresh conversations to update unread count
       fetchConversations()
